@@ -1,5 +1,8 @@
-# Entorno virtual
+# Entorno virtual (UV lo gestiona, no se commitea)
 .venv/
+
+# uv.lock SÍ se commitea — garantiza reproducibilidad
+# No agregar uv.lock aquí
 
 # Python
 __pycache__/
@@ -11,8 +14,14 @@ __pycache__/
 # macOS
 .DS_Store
 
-# Credenciales / cookies
+# Credenciales / cookies / entorno
 cookies.txt
+.env
+
+# Artefactos de debug
+audio_prueba_traducido.wav
+audio_original.wav
+voz_id_*.wav
 
 # Archivos de audio y video (binarios grandes)
 *.wav
