@@ -1,38 +1,60 @@
+"""Diagnóstico del pipeline de traducción — procesa 10s de un video y valida la salida.
+
+Uso:
+  python tools/debug_audio.py                      # usa INPUT_DIR/video.mp4
+  python tools/debug_audio.py /ruta/al/video.mp4
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import torch
 from transformers import SeamlessM4Tv2ForSpeechToSpeech, AutoProcessor
 import torchaudio
-import os
 import numpy as np
+
+from m4t_dubber import config
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Diagnóstico del pipeline M4T.")
+    parser.add_argument("video", nargs="?", help="Ruta al video (default: INPUT_DIR/video.mp4)")
+    parser.add_argument("-o", "--output", default="audio_prueba_traducido.wav")
+    return parser.parse_args()
+
 
 # --- CONFIGURACIÓN DE ARCHIVOS ---
 ARCHIVO_ENTRADA = "video.mp4"
 # ---------------------------------
 
-def debug_audio_translation():
-    if not os.path.exists(ARCHIVO_ENTRADA):
-        print(f"❌ Error: No se encontró '{ARCHIVO_ENTRADA}'")
-        return
+def debug_audio_translation(video_path: Path, output_path: Path) -> None:
+    if not video_path.exists():
+        print(f"❌ Error: No se encontró '{video_path}'")
+        sys.exit(1)
 
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"🍏 Device: {device}\n")
 
     # Cargar modelo
     print("📥 Cargando modelo...")
-    processor = AutoProcessor.from_pretrained("facebook/seamless-m4t-v2-large")
-    model = SeamlessM4Tv2ForSpeechToSpeech.from_pretrained("facebook/seamless-m4t-v2-large").to(device)
+    processor = AutoProcessor.from_pretrained(config.MODEL_ID)
+    model = SeamlessM4Tv2ForSpeechToSpeech.from_pretrained(config.MODEL_ID).to(device)
 
     # Cargar audio original
     print("📦 Cargando audio del video...")
-    audio, orig_freq = torchaudio.load(ARCHIVO_ENTRADA)
+    audio, orig_freq = torchaudio.load(str(video_path))
     print(f"   ✓ Audio original - Shape: {audio.shape}, Frecuencia: {orig_freq}Hz")
     print(f"   ✓ Rango de valores: [{audio.min():.4f}, {audio.max():.4f}]")
     print(f"   ✓ Dtype: {audio.dtype}")
 
     # Remuestrear
-    if orig_freq != 16000:
-        resampler = torchaudio.transforms.Resample(orig_freq, 16000)
+    if orig_freq != config.SAMPLE_RATE:
+        resampler = torchaudio.transforms.Resample(orig_freq, config.SAMPLE_RATE)
         audio = resampler(audio)
-        print(f"   ✓ Audio remuestreado a 16kHz - Shape: {audio.shape}")
+        print(f"   ✓ Audio remuestreado a {config.SAMPLE_RATE}Hz - Shape: {audio.shape}")
 
     # Convertir a mono
     if audio.shape[0] > 1:
@@ -41,7 +63,7 @@ def debug_audio_translation():
 
     # Procesar un pequeño fragmento de PRUEBA (10 segundos)
     print("\n🧪 PRUEBA: Procesando 10 segundos de audio...")
-    fragmento_prueba = audio[:, :160000]  # 10 segundos a 16kHz
+    fragmento_prueba = audio[:, : config.SAMPLE_RATE * 10]
     print(f"   ✓ Fragmento de prueba - Shape: {fragmento_prueba.shape}")
     print(f"   ✓ Rango: [{fragmento_prueba.min():.4f}, {fragmento_prueba.max():.4f}]")
 
@@ -49,7 +71,7 @@ def debug_audio_translation():
     print("\n🔧 Preparando entrada del procesador...")
     audio_inputs = processor(
         audio=fragmento_prueba.squeeze(0).numpy(),
-        sampling_rate=16000,
+        sampling_rate=config.SAMPLE_RATE,
         return_tensors="pt"
     )
     print(f"   ✓ Claves en audio_inputs: {audio_inputs.keys()}")
@@ -65,10 +87,10 @@ def debug_audio_translation():
     with torch.no_grad():
         output = model.generate(
             **audio_inputs,
-            tgt_lang="spa",
-            no_repeat_ngram_size=5,
-            repetition_penalty=1.3,
-            num_beams=2,
+            tgt_lang=config.TGT_LANG,
+            no_repeat_ngram_size=config.NO_REPEAT_NGRAM_SIZE,
+            repetition_penalty=config.REPETITION_PENALTY,
+            num_beams=config.NUM_BEAMS,
         )
 
     # Analizar salida
@@ -113,10 +135,16 @@ def debug_audio_translation():
         audio_tensor_cpu = audio_tensor_cpu.unsqueeze(0)
         print(f"   ✓ Audio reshape a: {audio_tensor_cpu.shape}")
 
-    torchaudio.save("audio_prueba_traducido.wav", audio_tensor_cpu, 16000)
-    print(f"   ✓ Guardado: audio_prueba_traducido.wav")
+    torchaudio.save(str(output_path), audio_tensor_cpu, config.SAMPLE_RATE)
+    print(f"   ✓ Guardado: {output_path}")
 
-    print("\n✅ Debug completado. Revisa el archivo 'audio_prueba_traducido.wav' para escuchar la calidad del audio traducido.")
+    print("\n✅ Debug completado. Escucha el archivo de salida para validar la calidad.")
+
+
+if __name__ == "__main__":
+    _args = _parse_args()
+    _video = Path(_args.video) if _args.video else config.INPUT_DIR / "video.mp4"
+    debug_audio_translation(_video, Path(_args.output))
 
 if __name__ == "__main__":
     debug_audio_translation()

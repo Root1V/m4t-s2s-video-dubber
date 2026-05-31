@@ -1,0 +1,8 @@
+# Core ML
+torch>=2.2
+torchaudio>=2.2
+transformers>=4.40
+numpy>=1.24
+
+# Video processing
+moviepy>=2.2.1
