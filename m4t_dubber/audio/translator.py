@@ -47,8 +47,12 @@ class AudioTranslator:
         output_path: Path,
         src_lang: str | None = None,
         tgt_lang: str | None = None,
-    ) -> Path:
-        """Translate audio track and save as WAV. Returns output_path.
+    ) -> tuple[Path, list[tuple[float, float, str]]]:
+        """Translate audio track and save as WAV.
+
+        Returns:
+            (output_path, subtitle_entries) where subtitle_entries is a list of
+            (start_seconds, end_seconds, translated_text) tuples, one per speech segment.
 
         Args:
             src_lang: Source language code (e.g. "eng"). Defaults to config.SRC_LANG.
@@ -73,7 +77,7 @@ class AudioTranslator:
         print(f"   ✓ {n_speech} segmentos de voz ({speech_s:.1f}s), {n_silence} de silencio")
 
         print(f"\n🗣️ Traduciendo {src_lang} → {tgt_lang} (speaker_id={config.SPEAKER_ID})...")
-        chunks = self._translate_segments(audio, segments, src_lang=src_lang, tgt_lang=tgt_lang)
+        chunks, subtitles = self._translate_segments(audio, segments, src_lang=src_lang, tgt_lang=tgt_lang)
 
         print("\n🎛️ Uniendo fragmentos...")
         audio_final = torch.cat(chunks, dim=1)
@@ -83,7 +87,7 @@ class AudioTranslator:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         torchaudio.save(str(output_path), audio_final, config.SAMPLE_RATE)
         print(f"\n🎉 Audio guardado: '{output_path}'")
-        return output_path
+        return output_path, subtitles
 
     # ── Private helpers ───────────────────────────────────────────
 
@@ -101,11 +105,12 @@ class AudioTranslator:
         segments: list[tuple[int, int, bool]],
         src_lang: str,
         tgt_lang: str,
-    ) -> list[torch.Tensor]:
-        seg_max = config.SAMPLE_RATE * config.MAX_CHUNK_S
-        seg_min = int(config.SAMPLE_RATE * config.MIN_CHUNK_S)
-        total   = audio.shape[1]
-        result: list[torch.Tensor] = []
+    ) -> tuple[list[torch.Tensor], list[tuple[float, float, str]]]:
+        seg_max   = config.SAMPLE_RATE * config.MAX_CHUNK_S
+        seg_min   = int(config.SAMPLE_RATE * config.MIN_CHUNK_S)
+        total     = audio.shape[1]
+        result:    list[torch.Tensor] = []
+        subtitles: list[tuple[float, float, str]] = []
 
         for idx, (start, end, is_speech) in enumerate(segments):
             seg_len = end - start
@@ -114,8 +119,9 @@ class AudioTranslator:
                 result.append(torch.zeros(1, seg_len))
                 continue
 
-            fragment = audio[:, start:end]
-            sub_out: list[torch.Tensor] = []
+            fragment   = audio[:, start:end]
+            sub_out:   list[torch.Tensor] = []
+            sub_texts: list[str] = []
 
             for j in range(0, seg_len, seg_max):
                 chunk = fragment[:, j:j + seg_max]
@@ -137,10 +143,18 @@ class AudioTranslator:
                         no_repeat_ngram_size=config.NO_REPEAT_NGRAM_SIZE,
                         repetition_penalty=config.REPETITION_PENALTY,
                         num_beams=config.NUM_BEAMS,
+                        return_intermediate_token_ids=True,
                     )
 
-                chunk_audio = (output[0] if isinstance(output, tuple) else output).cpu()
+                chunk_audio = output.waveform.cpu()
                 sub_out.append(chunk_audio)
+
+                if output.sequences is not None and len(output.sequences) > 0:
+                    text = self._processor.decode(
+                        output.sequences[0], skip_special_tokens=True
+                    ).strip()
+                    if text:
+                        sub_texts.append(text)
 
                 if self._device.type == "mps":
                     torch.mps.empty_cache()
@@ -153,10 +167,15 @@ class AudioTranslator:
             seg_audio = _stretch(seg_audio, seg_len)
             result.append(seg_audio)
 
+            if sub_texts:
+                start_s = start / config.SAMPLE_RATE
+                end_s   = end   / config.SAMPLE_RATE
+                subtitles.append((start_s, end_s, " ".join(sub_texts)))
+
             pct = round(end / total * 100, 1)
             print(f"   Segmento {idx + 1}/{len(segments)} — {pct}%")
 
-        return result
+        return result, subtitles
 
 
 # ── Module-level DSP helpers ──────────────────────────────────────

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from m4t_dubber import config
 from m4t_dubber.audio.assembler import VideoAssembler
+from m4t_dubber.audio.subtitler import write_srt
 from m4t_dubber.audio.translator import AudioTranslator
 
 
@@ -31,12 +32,14 @@ class DubbingPipeline:
         video_name: str | None = None,
         src_lang: str | None = None,
         tgt_lang: str | None = None,
+        generate_srt: bool = True,
     ) -> None:
         """Process one or all videos and print a summary.
 
         Args:
-            src_lang: Source language code (e.g. "eng"). Defaults to M4T_SRC_LANG env var.
-            tgt_lang: Target language code (e.g. "spa", "fra", "por"). Defaults to M4T_TGT_LANG env var.
+            src_lang:     Source language code (e.g. "eng"). Defaults to M4T_SRC_LANG env var.
+            tgt_lang:     Target language code (e.g. "spa", "fra", "por"). Defaults to M4T_TGT_LANG env var.
+            generate_srt: If True (default), write a .srt subtitle file alongside the output.
         """
         videos = self._collect_videos(video_name)
 
@@ -52,7 +55,7 @@ class DubbingPipeline:
             print(f"\n{'─' * 64}\n  [{i}/{len(videos)}] {video_path.name}\n{'─' * 64}")
             t0 = datetime.now()
             try:
-                self._process(video_path, src_lang=src_lang, tgt_lang=tgt_lang)
+                self._process(video_path, src_lang=src_lang, tgt_lang=tgt_lang, generate_srt=generate_srt)
                 self._move_to_processed(video_path)
                 duracion = str(datetime.now() - t0).split(".")[0]
                 exitosos.append((video_path.name, duracion))
@@ -80,15 +83,23 @@ class DubbingPipeline:
         video_path: Path,
         src_lang: str | None = None,
         tgt_lang: str | None = None,
+        generate_srt: bool = True,
     ) -> None:
         resolved_tgt = tgt_lang or config.TGT_LANG
         ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
         stem     = video_path.stem
         wav_path = config.OUTPUT_DIR / f"{stem}_{resolved_tgt}_{ts}.wav"
         mp4_path = config.OUTPUT_DIR / f"{stem}_{resolved_tgt}_{ts}.mp4"
+        srt_path = config.OUTPUT_DIR / f"{stem}_{resolved_tgt}_{ts}.srt"
 
         _banner(f"[TRADUCIENDO] {video_path.name}")
-        self.translator.translate(video_path, wav_path, src_lang=src_lang, tgt_lang=tgt_lang)
+        _, subtitles = self.translator.translate(
+            video_path, wav_path, src_lang=src_lang, tgt_lang=tgt_lang
+        )
+
+        if generate_srt and subtitles:
+            write_srt(subtitles, srt_path)
+            print(f"📝 Subtítulos: '{srt_path}'")
 
         _banner(f"[ENSAMBLANDO] {video_path.name} → {resolved_tgt}")
         self.assembler.assemble(video_path, wav_path, mp4_path)
