@@ -149,18 +149,63 @@ DELETE /jobs/{job_id}    — cancela y limpia
 ### F-06 — Clonación de voz del hablante
 **Prioridad:** Baja  
 **Impacto:** Muy alto en calidad perceptual — la voz traducida sonaría como el original  
-**Rama:** `feat/voice-cloning`
+**Rama:** `feat/voice-cloning`  
+**Estado:** ✅ Implementado en v1.5.0
 
-En vez del vocoder sintético de SeamlessM4T, usar un modelo TTS que:
-1. Extrae el embedding de voz del hablante original (e.g. con [Resemblyzer](https://github.com/resemble-ai/Resemblyzer))
-2. Sintetiza el texto traducido con esa voz (e.g. [StyleTTS2](https://github.com/yl4579/StyleTTS2) o [Coqui TTS](https://github.com/coqui-ai/TTS))
+Usa **F5-TTS v1 Base** (zero-shot, ~1.5 GB descarga única) para sintetizar la
+traducción con la voz del hablante original extraída de los primeros 15 s de voz
+real del video (saltando intros musicales con `_first_speech_s`).
 
-Pipeline alternativo:
+Pipeline:
 ```
-S2S audio → Whisper (transcripción) → traducción de texto → TTS con voz clonada
+Video MP4
+  ├─ SeamlessM4T (modo texto) → subtítulos traducidos
+  ├─ extract_reference(start=primer_segmento_habla) → reference.wav (15 s)
+  └─ F5-TTS.infer(ref=reference.wav, text=subtítulos_filtrados) → voz clonada
+       └─ MoviePy → MP4 final
 ```
 
-Requiere investigación adicional sobre latencia y calidad en MPS.
+Flag CLI: `--clone-voice` (combina con `--stem` para preservar música de fondo)
+
+**Limitación conocida:** Se usa una sola referencia de voz para todos los segmentos.
+Si el video tiene múltiples hablantes, todos sonarán igual (ver F-08).
+
+---
+
+### F-08 — Diarización multi-hablante
+**Prioridad:** Media  
+**Impacto:** Alto — videos con más de un hablante clonados correctamente por voz  
+**Rama:** `feat/speaker-diarization`  
+**Depende de:** F-06 (voice cloning)
+
+Actualmente `--clone-voice` extrae una sola referencia de voz y la aplica a todos
+los segmentos. Si el video tiene múltiples hablantes, todos suenan igual.
+
+Esta feature añade diarización automática con [pyannote.audio](https://github.com/pyannote/pyannote-audio)
+para detectar qué tramos de audio pertenecen a cada hablante, extraer una
+referencia individual por hablante y asignar la referencia correcta a cada
+segmento de síntesis.
+
+Pipeline:
+```
+Video MP4
+  ├─ pyannote.audio → diarización {speaker_id: [(t_start, t_end), ...]}
+  ├─ extract_reference × N_speakers → {speaker_id: reference.wav}
+  └─ F5-TTS.infer(ref=reference[speaker_id], text=segmento) × segmentos
+       └─ MoviePy → MP4 final
+```
+
+**Archivos a crear/modificar:**
+- `m4t_dubber/audio/diarizer.py` — clase `SpeakerDiarizer` (pyannote.audio)
+- `m4t_dubber/audio/voice_cloner.py` — `synthesize_from_segments` acepta
+  `speaker_refs: dict[str, Path]` para referencia por hablante
+- `m4t_dubber/pipeline.py` — integrar diarización antes de clonación
+- `pyproject.toml` — agregar `pyannote.audio`
+
+**Consideraciones:**
+- pyannote.audio requiere token de HuggingFace (aceptar términos del modelo)
+- Primer uso descarga ~1 GB de modelos adicionales
+- En videos con un solo hablante, se comporta igual que F-06 sin overhead
 
 ---
 
@@ -183,15 +228,16 @@ UI mínima con Gradio:
 
 ## Orden de implementación sugerido
 
-| # | Feature | Versión objetivo | Rama |
-|---|---|---|---|
-| 1 | F-02 — Multi-idioma CLI | v1.2.0 | `feat/multilang-cli` |
-| 2 | F-03 — Subtítulos SRT | v1.3.0 | `feat/subtitles` |
-| 3 | F-01 — Separación de voz | v1.4.0 | `feat/stem-separation` |
-| 4 | F-04 — Checkpoint/reanudación | v1.5.0 | `feat/resume-checkpoint` |
-| 5 | F-05 — API REST | v2.0.0 | `feat/rest-api` |
-| 6 | F-07 — UI Gradio | v2.1.0 | `feat/gradio-ui` |
-| 7 | F-06 — Clonación de voz | v2.2.0 | `feat/voice-cloning` |
+| # | Feature | Versión objetivo | Rama | Estado |
+|---|---|---|---|---|
+| 1 | F-02 — Multi-idioma CLI | v1.2.0 | `feat/multilang-cli` | ✅ |
+| 2 | F-03 — Subtítulos SRT | v1.3.0 | `feat/subtitles` | ✅ |
+| 3 | F-01 — Separación de voz | v1.4.0 | `feat/stem-separation` | ✅ |
+| 4 | F-06 — Clonación de voz | v1.5.0 | `feat/voice-cloning` | ✅ |
+| 5 | F-08 — Diarización multi-hablante | v1.6.0 | `feat/speaker-diarization` | ⬜ |
+| 6 | F-04 — Checkpoint/reanudación | v1.7.0 | `feat/resume-checkpoint` | ⬜ |
+| 7 | F-05 — API REST | v2.0.0 | `feat/rest-api` | ⬜ |
+| 8 | F-07 — UI Gradio | v2.1.0 | `feat/gradio-ui` | ⬜ |
 
 ---
 
