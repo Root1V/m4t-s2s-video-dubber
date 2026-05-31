@@ -24,6 +24,4 @@ cookies.txt
 *.mov
 *.m4v
 
-# Scripts descartados / versiones anteriores
-traducir0.py
-traducir1.py
+
