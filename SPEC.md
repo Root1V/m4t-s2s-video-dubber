@@ -1,0 +1,210 @@
+# SPEC — Especificaciones y Roadmap de Funcionalidades
+
+Este documento describe el estado actual del proyecto y las funcionalidades planificadas,
+ordenadas por prioridad de impacto. Cada ítem se implementa en su propia rama de `develop`
+y se mergea con tag de versión al completarse.
+
+---
+
+## Estado actual — v1.1.0
+
+### Pipeline implementado
+
+```
+Video MP4 → VAD → SeamlessM4T v2 S2S → Phase Vocoder → WAV + MP4
+```
+
+| Componente | Archivo | Estado |
+|---|---|---|
+| Configuración centralizada | `m4t_dubber/config.py` | ✅ |
+| Carga de audio (torchaudio + torchcodec) | `m4t_dubber/audio/translator.py` | ✅ |
+| VAD por energía RMS | `m4t_dubber/audio/translator.py` | ✅ |
+| Sub-chunking ≤ 15s (límite MPS) | `m4t_dubber/audio/translator.py` | ✅ |
+| Traducción S2S (SeamlessM4Tv2) | `m4t_dubber/audio/translator.py` | ✅ |
+| Stretch por phase vocoder | `m4t_dubber/audio/translator.py` | ✅ |
+| Ensamblado video + audio (MoviePy) | `m4t_dubber/audio/assembler.py` | ✅ |
+| Orquestador / procesamiento en lote | `m4t_dubber/pipeline.py` | ✅ |
+| CLI con argparse | `main.py` | ✅ |
+| Gestión de paquetes (UV) | `pyproject.toml` + `uv.lock` | ✅ |
+| Herramientas de diagnóstico | `tools/` | ✅ |
+
+### Limitaciones conocidas
+
+- La voz traducida se mezcla con música/efectos de fondo del original
+- Sin soporte para elegir idioma fuente/destino desde CLI
+- Sin subtítulos generados
+- Sin reanudación si el proceso se interrumpe a mitad
+- Voz sintética fija (speaker_id=4), no clona la voz del hablante original
+- Sin interfaz web ni API
+
+---
+
+## Funcionalidades pendientes
+
+### F-01 — Separación de voz de fondo (stem separation)
+**Prioridad:** Alta  
+**Impacto:** Muy alto — elimina el problema de la voz mezclada con música  
+**Rama:** `feat/stem-separation`
+
+Integrar [Demucs](https://github.com/facebookresearch/demucs) (htdemucs model) para separar:
+- `vocals` — voz del hablante (se traduce)
+- `no_vocals` — música, efectos, ambiente (se preserva intacta)
+
+Pipeline resultante:
+```
+Video MP4
+  └─ Demucs → vocals.wav + no_vocals.wav
+       └─ vocals.wav → [pipeline actual] → vocals_esp.wav
+            └─ mix(vocals_esp.wav, no_vocals.wav) → audio_final.wav
+                 └─ MoviePy → MP4
+```
+
+**Archivos a crear/modificar:**
+- `m4t_dubber/audio/separator.py` — clase `StemSeparator`
+- `m4t_dubber/pipeline.py` — integrar paso de separación
+- `pyproject.toml` — agregar `demucs`
+
+---
+
+### F-02 — Soporte multi-idioma desde CLI
+**Prioridad:** Alta  
+**Impacto:** Alto — el modelo ya soporta 100+ idiomas, solo falta exponerlo  
+**Rama:** `feat/multilang-cli`
+
+SeamlessM4T v2 soporta traducción entre docenas de idiomas. Actualmente solo inglés→español.
+
+Cambios:
+```bash
+# Nuevos flags en main.py
+uv run python main.py video.mp4 --src-lang eng --tgt-lang fra
+uv run python main.py video.mp4 --tgt-lang por  # portugués
+```
+
+**Archivos a modificar:**
+- `main.py` — agregar `--src-lang` (default: `eng`) y `--tgt-lang` (default: `spa`)
+- `m4t_dubber/config.py` — `SRC_LANG` como nueva variable de entorno `M4T_SRC_LANG`
+- `m4t_dubber/audio/translator.py` — pasar `src_lang` al procesador
+
+Idiomas SeamlessM4T soportados: `eng, spa, fra, deu, por, ita, jpn, cmn, ara, rus, ...`
+
+---
+
+### F-03 — Generación de subtítulos (SRT/VTT)
+**Prioridad:** Media  
+**Impacto:** Alto — el modelo genera texto internamente, es un subproducto gratuito  
+**Rama:** `feat/subtitles`
+
+El `SeamlessM4Tv2Processor` puede devolver tokens de texto además del audio.
+Capturar esos tokens permite generar subtítulos sincronizados con los timestamps del VAD.
+
+Salidas adicionales:
+- `{stem}_esp_{ts}.srt` — subtítulos en español
+- `{stem}_esp_{ts}_bilingual.srt` — bilingüe (inglés + español) opcional
+
+**Archivos a crear/modificar:**
+- `m4t_dubber/audio/subtitler.py` — clase `SubtitleGenerator`
+- `m4t_dubber/audio/translator.py` — capturar tokens de texto del modelo
+- `m4t_dubber/pipeline.py` — incluir generación de SRT en el flujo
+
+---
+
+### F-04 — Reanudación de trabajos (checkpoint por segmento)
+**Prioridad:** Media  
+**Impacto:** Alto para videos largos — evita reprocesar desde cero si hay un corte  
+**Rama:** `feat/resume-checkpoint`
+
+Para videos de 1+ hora, un fallo a mitad significa perder todo el trabajo. Implementar:
+- Cache de segmentos traducidos en disco (archivos `.npy` o `.pkl` por segmento)
+- Al reiniciar, cargar los segmentos ya procesados y continuar desde el último pendiente
+- Limpiar el cache al finalizar correctamente
+
+**Archivos a crear/modificar:**
+- `m4t_dubber/audio/checkpoint.py` — lógica de cache por segmento
+- `m4t_dubber/audio/translator.py` — integrar checkpoint en `_translate_segments()`
+- `m4t_dubber/config.py` — `CHECKPOINT_DIR` (default: `.cache/`)
+
+---
+
+### F-05 — API REST (FastAPI)
+**Prioridad:** Media  
+**Impacto:** Convierte la herramienta local en un servicio deployable  
+**Rama:** `feat/rest-api`
+
+Endpoints mínimos:
+```
+POST /translate          — sube video, devuelve job_id
+GET  /jobs/{job_id}      — status del trabajo (pending/running/done/error)
+GET  /jobs/{job_id}/download  — descarga el MP4 traducido
+DELETE /jobs/{job_id}    — cancela y limpia
+```
+
+**Archivos a crear:**
+- `api/main.py` — app FastAPI
+- `api/routes/jobs.py` — endpoints
+- `api/models.py` — schemas Pydantic
+- `pyproject.toml` — agregar `fastapi`, `uvicorn`, `python-multipart`
+
+---
+
+### F-06 — Clonación de voz del hablante
+**Prioridad:** Baja  
+**Impacto:** Muy alto en calidad perceptual — la voz traducida sonaría como el original  
+**Rama:** `feat/voice-cloning`
+
+En vez del vocoder sintético de SeamlessM4T, usar un modelo TTS que:
+1. Extrae el embedding de voz del hablante original (e.g. con [Resemblyzer](https://github.com/resemble-ai/Resemblyzer))
+2. Sintetiza el texto traducido con esa voz (e.g. [StyleTTS2](https://github.com/yl4579/StyleTTS2) o [Coqui TTS](https://github.com/coqui-ai/TTS))
+
+Pipeline alternativo:
+```
+S2S audio → Whisper (transcripción) → traducción de texto → TTS con voz clonada
+```
+
+Requiere investigación adicional sobre latencia y calidad en MPS.
+
+---
+
+### F-07 — Interfaz web (Gradio)
+**Prioridad:** Baja  
+**Impacto:** Accesibilidad para usuarios no técnicos  
+**Rama:** `feat/gradio-ui`
+
+UI mínima con Gradio:
+- Subida de video (drag & drop)
+- Selector de idioma destino
+- Barra de progreso por segmento
+- Preview y descarga del resultado
+
+**Archivos a crear:**
+- `app.py` — interfaz Gradio
+- `pyproject.toml` — agregar `gradio`
+
+---
+
+## Orden de implementación sugerido
+
+| # | Feature | Versión objetivo | Rama |
+|---|---|---|---|
+| 1 | F-02 — Multi-idioma CLI | v1.2.0 | `feat/multilang-cli` |
+| 2 | F-03 — Subtítulos SRT | v1.3.0 | `feat/subtitles` |
+| 3 | F-01 — Separación de voz | v1.4.0 | `feat/stem-separation` |
+| 4 | F-04 — Checkpoint/reanudación | v1.5.0 | `feat/resume-checkpoint` |
+| 5 | F-05 — API REST | v2.0.0 | `feat/rest-api` |
+| 6 | F-07 — UI Gradio | v2.1.0 | `feat/gradio-ui` |
+| 7 | F-06 — Clonación de voz | v2.2.0 | `feat/voice-cloning` |
+
+---
+
+## Convención de ramas y versiones
+
+```
+main          ← solo releases estables (merges desde develop con tag)
+develop       ← integración de features
+feat/<name>   ← una rama por feature de este SPEC
+fix/<name>    ← hotfixes
+```
+
+Versioning: `vMAJOR.MINOR.PATCH`
+- MAJOR: cambio de arquitectura (e.g. añadir API, cambiar modelo base)
+- MINOR: nueva funcionalidad (cada feature de este SPEC)
+- PATCH: bugfix o dependencias
