@@ -55,7 +55,13 @@ uv run python main.py "mi_video.mp4" --tgt-lang deu    # → alemán
 # Especificar ambos idiomas
 uv run python main.py "mi_video.mp4" --src-lang spa --tgt-lang eng   # español → inglés
 uv run python main.py "mi_video.mp4" --src-lang fra --tgt-lang jpn   # francés → japonés
+
+# Generar subtítulos .srt además del video (opt-in)
+uv run python main.py "mi_video.mp4" --srt
+uv run python main.py "mi_video.mp4" --tgt-lang fra --srt
 ```
+
+> **Subtítulos**: el flag `--srt` genera un archivo `.srt` sincronizado con los segmentos de voz del video traducido, en la misma carpeta de salida (`../resultados/`).
 
 El archivo de salida incluye el idioma destino en el nombre: `mi_video_spa_20260531_120000.mp4`
 
@@ -124,6 +130,15 @@ Copia `.env.example` como `.env` y ajusta según necesites:
 | `M4T_MAX_CHUNK_S` | `15` | Máximo segundos por chunk (límite MPS) |
 | `M4T_NUM_BEAMS` | `2` | Beams para generación |
 | `M4T_REPETITION_PENALTY` | `1.3` | Penalización de repetición |
+
+### Flags CLI
+
+| Flag | Descripción |
+|---|---|
+| `VIDEO` | Nombre del video en `INPUT_DIR` (opcional; sin él procesa todos) |
+| `--src-lang LANG` | Idioma fuente (código SeamlessM4T, ej. `eng`). Override de `M4T_SRC_LANG` |
+| `--tgt-lang LANG` | Idioma destino (código SeamlessM4T, ej. `spa`). Override de `M4T_TGT_LANG` |
+| `--srt` | Genera un `.srt` de subtítulos sincronizado (desactivado por defecto) |
 
 > Los flags `--src-lang` y `--tgt-lang` de la CLI tienen prioridad sobre las variables de entorno.
 
