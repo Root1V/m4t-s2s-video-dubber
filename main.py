@@ -8,6 +8,8 @@ Uso:
   python main.py tutorial.mp4 --srt             # generar subtítulos .srt además del video
   python main.py tutorial.mp4 --stem            # separar voz de fondo antes de traducir
   python main.py tutorial.mp4 --stem --srt      # separar voz + generar subtítulos
+  python main.py tutorial.mp4 --clone-voice     # clonar voz del hablante original con F5-TTS
+  python main.py tutorial.mp4 --clone-voice --stem  # clonar voz + preservar música de fondo
 
 Variables de entorno (o archivo .env):
   M4T_INPUT_DIR      Carpeta de videos de entrada
@@ -64,6 +66,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "Preserva música y efectos de audio intactos. Requiere ~80 MB extra."
         ),
     )
+    parser.add_argument(
+        "--clone-voice",
+        action="store_true",
+        dest="clone_voice",
+        help=(
+            "Clonar la voz del hablante original con F5-TTS (zero-shot). "
+            "La síntesis usa los primeros 15 s del audio como referencia. "
+            "Requiere ~1.5 GB de descarga en primer uso. "
+            "Combinar con --stem para preservar también la música de fondo."
+        ),
+    )
     return parser
 
 
@@ -76,6 +89,7 @@ def main() -> int:
         tgt_lang=args.tgt_lang,
         generate_srt=args.srt,
         use_stem=args.stem,
+        clone_voice=args.clone_voice,
     )
     return 0
 

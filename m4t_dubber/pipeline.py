@@ -13,6 +13,7 @@ from m4t_dubber.audio.assembler import VideoAssembler
 from m4t_dubber.audio.separator import StemSeparator
 from m4t_dubber.audio.subtitler import write_srt
 from m4t_dubber.audio.translator import AudioTranslator
+from m4t_dubber.audio.voice_cloner import VoiceCloner
 
 
 class DubbingPipeline:
@@ -28,6 +29,7 @@ class DubbingPipeline:
         self.translator = AudioTranslator()
         self.assembler  = VideoAssembler()
         self.separator  = StemSeparator()
+        self.cloner     = VoiceCloner()
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -38,6 +40,7 @@ class DubbingPipeline:
         tgt_lang: str | None = None,
         generate_srt: bool = False,
         use_stem: bool = False,
+        clone_voice: bool = False,
     ) -> None:
         """Process one or all videos and print a summary.
 
@@ -46,6 +49,8 @@ class DubbingPipeline:
             tgt_lang:     Target language code (e.g. "spa", "fra", "por"). Defaults to M4T_TGT_LANG env var.
             generate_srt: If True, write a .srt subtitle file alongside the output. Default: False.
             use_stem:     If True, separate vocals from background before translating. Default: False.
+            clone_voice:  If True, synthesize translated speech in the original speaker's voice
+                          using F5-TTS zero-shot voice cloning. Default: False.
         """
         videos = self._collect_videos(video_name)
 
@@ -61,7 +66,7 @@ class DubbingPipeline:
             print(f"\n{'─' * 64}\n  [{i}/{len(videos)}] {video_path.name}\n{'─' * 64}")
             t0 = datetime.now()
             try:
-                self._process(video_path, src_lang=src_lang, tgt_lang=tgt_lang, generate_srt=generate_srt, use_stem=use_stem)
+                self._process(video_path, src_lang=src_lang, tgt_lang=tgt_lang, generate_srt=generate_srt, use_stem=use_stem, clone_voice=clone_voice)
                 self._move_to_processed(video_path)
                 duracion = str(datetime.now() - t0).split(".")[0]
                 exitosos.append((video_path.name, duracion))
@@ -91,6 +96,7 @@ class DubbingPipeline:
         tgt_lang: str | None = None,
         generate_srt: bool = False,
         use_stem: bool = False,
+        clone_voice: bool = False,
     ) -> None:
         resolved_tgt = tgt_lang or config.TGT_LANG
         ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -99,7 +105,55 @@ class DubbingPipeline:
         mp4_path = config.OUTPUT_DIR / f"{stem}_{resolved_tgt}_{ts}.mp4"
         srt_path = config.OUTPUT_DIR / f"{stem}_{resolved_tgt}_{ts}.srt"
 
-        if use_stem:
+        if use_stem and clone_voice:
+            # ── Stem separation + voice cloning ───────────────────
+            _banner(f"[SEPARANDO STEMS] {video_path.name}")
+            vocals_path, no_vocals_path, tmp_dir = self.separator.separate(video_path)
+            try:
+                _banner(f"[TRADUCIENDO (texto)] {video_path.name}")
+                dummy_wav = tmp_dir / "vocals_translated.wav"
+                _, subtitles = self.translator.translate(
+                    vocals_path, dummy_wav, src_lang=src_lang, tgt_lang=tgt_lang
+                )
+                ref_path = tmp_dir / "reference.wav"
+                self.cloner.extract_reference(vocals_path, ref_path)
+                _wav, _sr = torchaudio.load(str(dummy_wav))
+                total_dur = _wav.shape[1] / _sr
+                del _wav
+                vocals_cloned = tmp_dir / "vocals_cloned.wav"
+                _banner(f"[CLONANDO VOZ] {video_path.name}")
+                self.cloner.synthesize_from_segments(
+                    subtitles, ref_path, vocals_cloned, total_duration=total_dur
+                )
+                _banner(f"[MEZCLANDO STEMS] {video_path.name}")
+                _mix_stems(vocals_cloned, no_vocals_path, wav_path)
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        elif clone_voice:
+            # ── Voice cloning (standard audio, no stem separation) ─
+            import tempfile as _tempfile
+
+            with _tempfile.TemporaryDirectory(prefix="m4t_clone_") as tmpdir:
+                tmp_path  = Path(tmpdir)
+                dummy_wav = tmp_path / "translated_dummy.wav"
+                ref_path  = tmp_path / "reference.wav"
+
+                _banner(f"[TRADUCIENDO (texto)] {video_path.name}")
+                _, subtitles = self.translator.translate(
+                    video_path, dummy_wav, src_lang=src_lang, tgt_lang=tgt_lang
+                )
+                self.cloner.extract_reference(video_path, ref_path)
+                _wav, _sr = torchaudio.load(str(dummy_wav))
+                total_dur = _wav.shape[1] / _sr
+                del _wav
+
+                _banner(f"[CLONANDO VOZ] {video_path.name}")
+                self.cloner.synthesize_from_segments(
+                    subtitles, ref_path, wav_path, total_duration=total_dur
+                )
+
+        elif use_stem:
             # ── Stem-separated pipeline ───────────────────────────
             _banner(f"[SEPARANDO STEMS] {video_path.name}")
             vocals_path, no_vocals_path, tmp_dir = self.separator.separate(video_path)

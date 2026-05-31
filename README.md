@@ -64,9 +64,15 @@ uv run python main.py "mi_video.mp4" --tgt-lang fra --srt
 # Separar voz de fondo antes de traducir (Demucs htdemucs)
 uv run python main.py "mi_video.mp4" --stem
 uv run python main.py "mi_video.mp4" --stem --srt   # combinar con subtítulos
+
+# Clonar la voz del hablante original con F5-TTS (zero-shot)
+uv run python main.py "mi_video.mp4" --clone-voice
+uv run python main.py "mi_video.mp4" --clone-voice --stem   # clonar voz + preservar música
 ```
 
 > **Stem separation**: `--stem` usa Demucs (htdemucs) para aislar la voz de la música y efectos de fondo. La música se preserva intacta en el video final. Descarga ~80 MB de modelo en el primer uso.
+
+> **Voice cloning**: `--clone-voice` usa F5-TTS (zero-shot) para sintetizar el texto traducido con la voz del hablante original. Usa los primeros 15 s del audio como referencia. Descarga ~1.5 GB de modelo en el primer uso. Se puede combinar con `--stem` para usar las vocales separadas como referencia y mezclar la voz clonada con la música de fondo.
 
 El archivo de salida incluye el idioma destino en el nombre: `mi_video_spa_20260531_120000.mp4`
 
@@ -147,6 +153,7 @@ Copia `.env.example` como `.env` y ajusta según necesites:
 | `--tgt-lang LANG` | Idioma destino (código SeamlessM4T, ej. `spa`). Override de `M4T_TGT_LANG` |
 | `--srt` | Genera un `.srt` de subtítulos sincronizado (desactivado por defecto) |
 | `--stem` | Separa voz de fondo con Demucs antes de traducir; preserva música/efectos (desactivado por defecto) |
+| `--clone-voice` | Clona la voz del hablante original con F5-TTS zero-shot; combinar con `--stem` para mejor calidad (desactivado por defecto) |
 
 > Los flags `--src-lang` y `--tgt-lang` de la CLI tienen prioridad sobre las variables de entorno.
 
@@ -183,6 +190,22 @@ Video MP4
        └─ vocals.wav → [pipeline anterior] → vocals_traducido.wav
             └─ mix(vocals_traducido, no_vocals) → audio_final.wav
                  └─ MoviePy → MP4 final
+
+# Con --clone-voice:
+Video MP4
+  └─ [pipeline de traducción] → subtítulos (start_s, end_s, texto_traducido)
+       └─ extract_reference(primeros 15s) → reference.wav
+            └─ F5-TTS.infer(texto, reference) × N segmentos → audio_clonado.wav
+                 └─ MoviePy → MP4 final
+
+# Con --clone-voice --stem (mejor calidad):
+Video MP4
+  └─ Demucs htdemucs → vocals.wav + no_vocals.wav
+       └─ vocals.wav → SeamlessM4T (solo texto) → subtítulos
+            └─ extract_reference(vocals, 15s) → reference.wav
+                 └─ F5-TTS.infer(texto, reference) × N → vocals_clonados.wav
+                      └─ mix(vocals_clonados, no_vocals) → audio_final.wav
+                           └─ MoviePy → MP4 final
 ```
 
 ## Dependencias clave
@@ -196,6 +219,7 @@ Video MP4
 | `sentencepiece` | 0.2.1 | Tokenizer del modelo |
 | `protobuf` | 7.35.0 | Requerido por sentencepiece |
 | `demucs` | 4.0.1 | Separación de stems (vocals / no_vocals) |
+| `f5-tts` | ≥1.0 | Clonación de voz zero-shot (F5-TTS v1 Base) |
 | `moviepy` | 2.2.1 | Ensamblado de video final |
 | `numpy` | 2.2.6 | DSP (VAD, stretch, normalización) |
 
@@ -224,3 +248,4 @@ uv run ruff check .
 | `v1.2.0` | Soporte multi-idioma CLI (`--src-lang` / `--tgt-lang`) |
 | `v1.3.0` | Subtítulos SRT opt-in (`--srt`) |
 | `v1.4.0` | Separación de voz de fondo con Demucs (`--stem`) |
+| `v1.5.0` | Clonación de voz zero-shot con F5-TTS (`--clone-voice`) |
