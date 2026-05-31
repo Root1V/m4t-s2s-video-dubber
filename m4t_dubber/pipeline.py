@@ -126,7 +126,8 @@ class DubbingPipeline:
                 vocals_cloned = tmp_dir / "vocals_cloned.wav"
                 _banner(f"[CLONANDO VOZ] {video_path.name}")
                 self.cloner.synthesize_from_segments(
-                    subtitles, ref_path, vocals_cloned, total_duration=total_dur
+                    _filter_translation(subtitles, resolved_tgt),
+                    ref_path, vocals_cloned, total_duration=total_dur
                 )
                 _banner(f"[MEZCLANDO STEMS] {video_path.name}")
                 _mix_stems(vocals_cloned, no_vocals_path, wav_path)
@@ -155,7 +156,8 @@ class DubbingPipeline:
 
                 _banner(f"[CLONANDO VOZ] {video_path.name}")
                 self.cloner.synthesize_from_segments(
-                    subtitles, ref_path, wav_path, total_duration=total_dur
+                    _filter_translation(subtitles, resolved_tgt),
+                    ref_path, wav_path, total_duration=total_dur
                 )
 
         elif use_stem:
@@ -249,6 +251,55 @@ def _mix_stems(vocals_path: Path, no_vocals_path: Path, output_path: Path) -> No
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torchaudio.save(str(output_path), mixed, sr_bg)
     print(f"🎚️  Mezcla guardada: '{output_path.name}'")
+
+
+def _filter_translation(
+    subtitles: list[tuple[float, float, str]],
+    tgt_lang: str,
+) -> list[tuple[float, float, str]]:
+    """Remove sentences left in the source language from subtitle entries.
+
+    SeamlessM4T occasionally returns untranslated (English) sentences mixed
+    with the target-language translation.  This strips them so F5-TTS does
+    not synthesise English speech in a Spanish/French/... dub.
+
+    Non-English targets only — English is passed through unchanged.
+    """
+    if tgt_lang.startswith('eng') or tgt_lang in ('en', 'en-US'):
+        return subtitles
+
+    # Characters that appear in Spanish / French / Portuguese / Italian / German
+    # but NOT in plain English — strong signal the sentence is in the target lang.
+    _tgt_chars = re.compile(r'[áéíóúñüÁÉÍÓÚÑÜ¿¡àèìòùâêîôûçœæÀÈÌÒÙÂÊÎÔÛÇÄÖÜäöüß]')
+    # Sentence-initial words that almost never start a Spanish/French/etc. sentence
+    _en_start = re.compile(
+        r'^(This|The\s|And\s|But\s|We\s|It\s|In\s|At\s|For\s|With\s|As\s|By\s|'
+        r'From\s|These\s|Those\s|That\s|There\s|Here\s|Where\s|When\s|How\s|'
+        r'What\s|Who\s|Which\s|Not\s|Some\s|All\s|Each\s|Every\s|More\s|Most\s|'
+        r'Such\s|Then\s|Than\s|Also\s|Both\s|Just\s|New\s|Our\s|Their\s|Your\s|'
+        r'His\s|Her\s|Its\s|My\s|Any\s|Other\s)',
+        re.IGNORECASE,
+    )
+
+    result: list[tuple[float, float, str]] = []
+    for start_s, end_s, text in subtitles:
+        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+        kept: list[str] = []
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent:
+                continue
+            # Keep if it contains target-language characters
+            if _tgt_chars.search(sent):
+                kept.append(sent)
+            # Keep if it does NOT look like an English-only sentence
+            elif not _en_start.match(sent):
+                kept.append(sent)
+            else:
+                print(f"   [filtro] ignorando frase en src-lang: {sent[:70]}")
+        # Fallback: keep original text if the filter removed everything
+        result.append((start_s, end_s, ' '.join(kept) if kept else text))
+    return result
 
 
 def _first_speech_s(subtitles: list[tuple[float, float, str]]) -> float:
