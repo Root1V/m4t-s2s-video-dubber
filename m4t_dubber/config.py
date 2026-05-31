@@ -16,6 +16,7 @@ PROCESSED_DIR = Path(os.getenv("M4T_PROCESSED_DIR", str(_PROJECT_ROOT / "procesa
 
 # ── Modelo ────────────────────────────────────────────────────────
 MODEL_ID   = os.getenv("M4T_MODEL_ID",  "facebook/seamless-m4t-v2-large")
+SRC_LANG   = os.getenv("M4T_SRC_LANG", "eng")  # idioma fuente (SeamlessM4T auto-detecta si no se especifica)
 TGT_LANG   = os.getenv("M4T_TGT_LANG", "spa")
 SPEAKER_ID = int(os.getenv("M4T_SPEAKER_ID", "4"))  # 0-199; 4 = voz masculina en español
 
