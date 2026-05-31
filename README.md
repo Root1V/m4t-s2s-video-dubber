@@ -1,15 +1,16 @@
 # m4t-s2s-video-dubber
 
-Traductor de video inglés → español usando [SeamlessM4T v2 Large](https://huggingface.co/facebook/seamless-m4t-v2-large) de Meta, con soporte nativo para Apple Silicon (MPS).
+Dobla videos a cualquier idioma usando [SeamlessM4T v2 Large](https://huggingface.co/facebook/seamless-m4t-v2-large) de Meta — traduce habla en un solo paso (Speech-to-Speech), sin pasar por texto. Por defecto traduce al **español**. Soporte nativo para Apple Silicon (MPS).
 
 ## Características actuales
 
-- **Speech-to-Speech (S2S)** con SeamlessM4T v2: traduce habla en inglés a habla en español en un solo paso (sin texto intermedio)
+- **Speech-to-Speech (S2S)** con SeamlessM4T v2: traduce habla en un solo paso, sin texto intermedio
+- **Multi-idioma**: cualquier combinación de idiomas soportados por SeamlessM4T (100+) vía `--src-lang` / `--tgt-lang`
 - **VAD** (Voice Activity Detection) por energía RMS: preserva los silencios originales del video
 - **Phase vocoder** (stretch): ajusta cada segmento traducido a la duración original sin artefactos graves
 - **Procesamiento en lote**: procesa todos los videos de una carpeta automáticamente
 - **Configuración por variables de entorno** (`M4T_*`): sin hardcodeo de rutas ni parámetros
-- **CLI** con argparse: procesa un video específico o toda la cola
+- **CLI** con argparse: procesa un video específico o toda la cola con flags de idioma
 - **Gestión de paquetes con UV**: entorno reproducible vía `pyproject.toml` + `uv.lock`
 
 ## Hardware probado
@@ -40,14 +41,38 @@ cp .env.example .env
 ## Uso
 
 ```bash
-# Procesar todos los videos en la carpeta videos/
+# Traducir todos los videos en videos/ → español (default)
 uv run python main.py
 
-# Procesar un video específico
+# Traducir un video específico → español
 uv run python main.py "mi_video.mp4"
+
+# Especificar idioma destino
+uv run python main.py "mi_video.mp4" --tgt-lang fra    # → francés
+uv run python main.py "mi_video.mp4" --tgt-lang por    # → portugués
+uv run python main.py "mi_video.mp4" --tgt-lang deu    # → alemán
+
+# Especificar ambos idiomas
+uv run python main.py "mi_video.mp4" --src-lang spa --tgt-lang eng   # español → inglés
+uv run python main.py "mi_video.mp4" --src-lang fra --tgt-lang jpn   # francés → japonés
 ```
 
+El archivo de salida incluye el idioma destino en el nombre: `mi_video_spa_20260531_120000.mp4`
+
 Los videos se buscan en `../videos/` (relativo al repo), los resultados se guardan en `../resultados/` y los procesados se mueven a `../procesados/`.
+
+### Idiomas soportados
+
+| Código | Idioma | Código | Idioma |
+|---|---|---|---|
+| `eng` | Inglés | `spa` | **Español** (default) |
+| `fra` | Francés | `por` | Portugués |
+| `deu` | Alemán | `ita` | Italiano |
+| `jpn` | Japonés | `cmn` | Chino mandarín |
+| `ara` | Árabe | `rus` | Ruso |
+| `hin` | Hindi | `kor` | Coreano |
+
+Lista completa en [SeamlessM4T supported languages](https://huggingface.co/facebook/seamless-m4t-v2-large#supported-languages).
 
 ### Carpetas de trabajo
 
@@ -93,11 +118,14 @@ Copia `.env.example` como `.env` y ajusta según necesites:
 | `M4T_OUTPUT_DIR` | `../resultados` | Carpeta de salida |
 | `M4T_PROCESSED_DIR` | `../procesados` | Carpeta de videos procesados |
 | `M4T_MODEL_ID` | `facebook/seamless-m4t-v2-large` | Modelo HuggingFace |
-| `M4T_TGT_LANG` | `spa` | Idioma destino |
+| `M4T_SRC_LANG` | `eng` | Idioma fuente (el modelo auto-detecta si se omite) |
+| `M4T_TGT_LANG` | `spa` | **Idioma destino (español por defecto)** |
 | `M4T_SPEAKER_ID` | `4` | Voz del locutor (0-199) |
 | `M4T_MAX_CHUNK_S` | `15` | Máximo segundos por chunk (límite MPS) |
 | `M4T_NUM_BEAMS` | `2` | Beams para generación |
 | `M4T_REPETITION_PENALTY` | `1.3` | Penalización de repetición |
+
+> Los flags `--src-lang` y `--tgt-lang` de la CLI tienen prioridad sobre las variables de entorno.
 
 ## Herramientas de diagnóstico
 
