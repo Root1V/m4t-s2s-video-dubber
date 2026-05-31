@@ -1,0 +1,30 @@
+# Entorno virtual
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ruff_cache/
+
+# macOS
+.DS_Store
+
+# Credenciales / cookies
+cookies.txt
+
+# Archivos de audio y video (binarios grandes)
+*.wav
+*.mp3
+*.webm
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.m4v
+
+# Scripts descartados / versiones anteriores
+traducir0.py
+traducir1.py
+debug_audio.py
