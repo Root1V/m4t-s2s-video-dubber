@@ -6,6 +6,7 @@ Dobla videos a cualquier idioma usando [SeamlessM4T v2 Large](https://huggingfac
 
 - **Speech-to-Speech (S2S)** con SeamlessM4T v2: traduce habla en un solo paso, sin texto intermedio
 - **Multi-idioma**: cualquier combinación de idiomas soportados por SeamlessM4T (100+) vía `--src-lang` / `--tgt-lang`
+- **Stem separation** (Demucs htdemucs): separa voz del fondo musical antes de traducir — preserva música y efectos intactos
 - **VAD** (Voice Activity Detection) por energía RMS: preserva los silencios originales del video
 - **Phase vocoder** (stretch): ajusta cada segmento traducido a la duración original sin artefactos graves
 - **Procesamiento en lote**: procesa todos los videos de una carpeta automáticamente
@@ -59,9 +60,13 @@ uv run python main.py "mi_video.mp4" --src-lang fra --tgt-lang jpn   # francés 
 # Generar subtítulos .srt además del video (opt-in)
 uv run python main.py "mi_video.mp4" --srt
 uv run python main.py "mi_video.mp4" --tgt-lang fra --srt
+
+# Separar voz de fondo antes de traducir (Demucs htdemucs)
+uv run python main.py "mi_video.mp4" --stem
+uv run python main.py "mi_video.mp4" --stem --srt   # combinar con subtítulos
 ```
 
-> **Subtítulos**: el flag `--srt` genera un archivo `.srt` sincronizado con los segmentos de voz del video traducido, en la misma carpeta de salida (`../resultados/`).
+> **Stem separation**: `--stem` usa Demucs (htdemucs) para aislar la voz de la música y efectos de fondo. La música se preserva intacta en el video final. Descarga ~80 MB de modelo en el primer uso.
 
 El archivo de salida incluye el idioma destino en el nombre: `mi_video_spa_20260531_120000.mp4`
 
@@ -107,7 +112,9 @@ traductor_m4/
 │   └── audio/
 │       ├── __init__.py
 │       ├── translator.py      # AudioTranslator — carga modelo, segmenta, traduce
-│       └── assembler.py       # VideoAssembler — mezcla audio traducido con video
+│       ├── assembler.py       # VideoAssembler — mezcla audio traducido con video
+│       ├── separator.py       # StemSeparator — separa voz de fondo con Demucs
+│       └── subtitler.py       # write_srt — genera archivo .srt
 └── tools/
     ├── probar_voces.py        # Prueba speaker IDs 0-199 para elegir voz
     ├── extraer_audio.py       # Extrae audio de un video a WAV
@@ -139,6 +146,7 @@ Copia `.env.example` como `.env` y ajusta según necesites:
 | `--src-lang LANG` | Idioma fuente (código SeamlessM4T, ej. `eng`). Override de `M4T_SRC_LANG` |
 | `--tgt-lang LANG` | Idioma destino (código SeamlessM4T, ej. `spa`). Override de `M4T_TGT_LANG` |
 | `--srt` | Genera un `.srt` de subtítulos sincronizado (desactivado por defecto) |
+| `--stem` | Separa voz de fondo con Demucs antes de traducir; preserva música/efectos (desactivado por defecto) |
 
 > Los flags `--src-lang` y `--tgt-lang` de la CLI tienen prioridad sobre las variables de entorno.
 
@@ -168,6 +176,13 @@ Video MP4
                       └─ phase vocoder stretch → duración original
                            └─ concatenar + normalizar → WAV
                                 └─ MoviePy → MP4 final
+
+# Con --stem:
+Video MP4
+  └─ Demucs htdemucs → vocals.wav + no_vocals.wav (44.1 kHz stereo)
+       └─ vocals.wav → [pipeline anterior] → vocals_traducido.wav
+            └─ mix(vocals_traducido, no_vocals) → audio_final.wav
+                 └─ MoviePy → MP4 final
 ```
 
 ## Dependencias clave
@@ -180,6 +195,7 @@ Video MP4
 | `transformers` | 5.9.0 | Modelo SeamlessM4Tv2 + AutoProcessor |
 | `sentencepiece` | 0.2.1 | Tokenizer del modelo |
 | `protobuf` | 7.35.0 | Requerido por sentencepiece |
+| `demucs` | 4.0.1 | Separación de stems (vocals / no_vocals) |
 | `moviepy` | 2.2.1 | Ensamblado de video final |
 | `numpy` | 2.2.6 | DSP (VAD, stretch, normalización) |
 
@@ -205,3 +221,6 @@ uv run ruff check .
 |---|---|
 | `v1.0.0` | Pipeline funcional inicial (scripts planos) |
 | `v1.1.0` | Reestructuración enterprise + UV + dependencias corregidas |
+| `v1.2.0` | Soporte multi-idioma CLI (`--src-lang` / `--tgt-lang`) |
+| `v1.3.0` | Subtítulos SRT opt-in (`--srt`) |
+| `v1.4.0` | Separación de voz de fondo con Demucs (`--stem`) |

@@ -6,8 +6,11 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+import torchaudio
+
 from m4t_dubber import config
 from m4t_dubber.audio.assembler import VideoAssembler
+from m4t_dubber.audio.separator import StemSeparator
 from m4t_dubber.audio.subtitler import write_srt
 from m4t_dubber.audio.translator import AudioTranslator
 
@@ -24,6 +27,7 @@ class DubbingPipeline:
     def __init__(self) -> None:
         self.translator = AudioTranslator()
         self.assembler  = VideoAssembler()
+        self.separator  = StemSeparator()
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -33,6 +37,7 @@ class DubbingPipeline:
         src_lang: str | None = None,
         tgt_lang: str | None = None,
         generate_srt: bool = False,
+        use_stem: bool = False,
     ) -> None:
         """Process one or all videos and print a summary.
 
@@ -40,6 +45,7 @@ class DubbingPipeline:
             src_lang:     Source language code (e.g. "eng"). Defaults to M4T_SRC_LANG env var.
             tgt_lang:     Target language code (e.g. "spa", "fra", "por"). Defaults to M4T_TGT_LANG env var.
             generate_srt: If True, write a .srt subtitle file alongside the output. Default: False.
+            use_stem:     If True, separate vocals from background before translating. Default: False.
         """
         videos = self._collect_videos(video_name)
 
@@ -55,7 +61,7 @@ class DubbingPipeline:
             print(f"\n{'─' * 64}\n  [{i}/{len(videos)}] {video_path.name}\n{'─' * 64}")
             t0 = datetime.now()
             try:
-                self._process(video_path, src_lang=src_lang, tgt_lang=tgt_lang, generate_srt=generate_srt)
+                self._process(video_path, src_lang=src_lang, tgt_lang=tgt_lang, generate_srt=generate_srt, use_stem=use_stem)
                 self._move_to_processed(video_path)
                 duracion = str(datetime.now() - t0).split(".")[0]
                 exitosos.append((video_path.name, duracion))
@@ -84,6 +90,7 @@ class DubbingPipeline:
         src_lang: str | None = None,
         tgt_lang: str | None = None,
         generate_srt: bool = False,
+        use_stem: bool = False,
     ) -> None:
         resolved_tgt = tgt_lang or config.TGT_LANG
         ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -92,10 +99,26 @@ class DubbingPipeline:
         mp4_path = config.OUTPUT_DIR / f"{stem}_{resolved_tgt}_{ts}.mp4"
         srt_path = config.OUTPUT_DIR / f"{stem}_{resolved_tgt}_{ts}.srt"
 
-        _banner(f"[TRADUCIENDO] {video_path.name}")
-        _, subtitles = self.translator.translate(
-            video_path, wav_path, src_lang=src_lang, tgt_lang=tgt_lang
-        )
+        if use_stem:
+            # ── Stem-separated pipeline ───────────────────────────
+            _banner(f"[SEPARANDO STEMS] {video_path.name}")
+            vocals_path, no_vocals_path, tmp_dir = self.separator.separate(video_path)
+            try:
+                _banner(f"[TRADUCIENDO VOCES] {video_path.name}")
+                vocals_translated = tmp_dir / "vocals_translated.wav"
+                _, subtitles = self.translator.translate(
+                    vocals_path, vocals_translated, src_lang=src_lang, tgt_lang=tgt_lang
+                )
+                _banner(f"[MEZCLANDO STEMS] {video_path.name}")
+                _mix_stems(vocals_translated, no_vocals_path, wav_path)
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+        else:
+            # ── Standard pipeline ─────────────────────────────────
+            _banner(f"[TRADUCIENDO] {video_path.name}")
+            _, subtitles = self.translator.translate(
+                video_path, wav_path, src_lang=src_lang, tgt_lang=tgt_lang
+            )
 
         if generate_srt and subtitles:
             write_srt(subtitles, srt_path)
@@ -134,6 +157,39 @@ class DubbingPipeline:
 
 
 # ── Helpers ───────────────────────────────────────────────────────
+
+
+def _mix_stems(vocals_path: Path, no_vocals_path: Path, output_path: Path) -> None:
+    """Mix translated vocals with preserved background stems into a single WAV.
+
+    Handles sample-rate mismatch (vocals are at 16 kHz, background at 44.1 kHz)
+    and length differences caused by the translation phase-vocoder stretch.
+    """
+    v,  sr_v  = torchaudio.load(str(vocals_path))
+    bg, sr_bg = torchaudio.load(str(no_vocals_path))
+
+    # Resample translated vocals to match background sample rate
+    if sr_v != sr_bg:
+        v = torchaudio.transforms.Resample(sr_v, sr_bg)(v)
+
+    # Broadcast mono vocals to stereo if background is stereo
+    if bg.shape[0] > v.shape[0]:
+        v = v.repeat(bg.shape[0], 1)
+
+    # Align lengths (translation may shift total duration slightly)
+    min_len = min(v.shape[1], bg.shape[1])
+    v  = v[:,  :min_len]
+    bg = bg[:, :min_len]
+
+    # Mix and normalize to avoid clipping (leave 5% headroom)
+    mixed = v + bg
+    peak  = mixed.abs().max()
+    if peak > 1e-7:
+        mixed = mixed / peak * 0.95
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torchaudio.save(str(output_path), mixed, sr_bg)
+    print(f"🎚️  Mezcla guardada: '{output_path.name}'")
 
 
 def _banner(title: str, width: int = 64) -> None:

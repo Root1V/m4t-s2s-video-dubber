@@ -6,6 +6,8 @@ Uso:
   python main.py tutorial.mp4 --tgt-lang fra    # traducir al francés
   python main.py tutorial.mp4 --src-lang spa --tgt-lang eng  # español → inglés
   python main.py tutorial.mp4 --srt             # generar subtítulos .srt además del video
+  python main.py tutorial.mp4 --stem            # separar voz de fondo antes de traducir
+  python main.py tutorial.mp4 --stem --srt      # separar voz + generar subtítulos
 
 Variables de entorno (o archivo .env):
   M4T_INPUT_DIR      Carpeta de videos de entrada
@@ -54,6 +56,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Generar archivo de subtítulos .srt junto al video traducido",
     )
+    parser.add_argument(
+        "--stem",
+        action="store_true",
+        help=(
+            "Separar voz de fondo con Demucs (htdemucs) antes de traducir. "
+            "Preserva música y efectos de audio intactos. Requiere ~80 MB extra."
+        ),
+    )
     return parser
 
 
@@ -65,6 +75,7 @@ def main() -> int:
         src_lang=args.src_lang,
         tgt_lang=args.tgt_lang,
         generate_srt=args.srt,
+        use_stem=args.stem,
     )
     return 0
 
