@@ -45,18 +45,23 @@ class VoiceCloner:
         audio_path: Path,
         output_path: Path | None = None,
         duration_s: float = REF_DURATION,
+        start_s: float = 0.0,
     ) -> Path:
-        """Save first ``duration_s`` seconds of ``audio_path`` as a speaker reference WAV.
+        """Save ``duration_s`` seconds of ``audio_path`` starting at ``start_s`` as reference WAV.
 
         Args:
             audio_path:  Source audio or video file (any format torchaudio can read).
             output_path: Destination WAV.  A temp file is used when *None*.
             duration_s:  Maximum clip length in seconds (default 15 s).
+            start_s:     Start offset in seconds.  Use to skip music intros and go straight
+                         to the first actual speech segment (default 0).
 
         Returns:
             Path to the reference WAV.
         """
         wav, sr = torchaudio.load(str(audio_path))
+        start_sample = int(sr * start_s)
+        wav = wav[:, start_sample:]
         max_samples = int(sr * duration_s)
         wav = wav[:, :max_samples]
 
@@ -68,7 +73,8 @@ class VoiceCloner:
             tmp.close()
 
         torchaudio.save(str(output_path), wav, sr)
-        print(f"   ✓ Referencia de voz: {output_path.name}  ({wav.shape[1] / sr:.1f} s)")
+        offset_info = f", desde {start_s:.1f}s" if start_s > 0 else ""
+        print(f"   ✓ Referencia de voz: {output_path.name}  ({wav.shape[1] / sr:.1f} s{offset_info})")
         return output_path
 
     def synthesize_from_segments(
@@ -114,18 +120,20 @@ class VoiceCloner:
             if not text.strip():
                 continue
 
-            seg_duration  = end_s - start_s
-            start_sample  = int(start_s * sr)
-            short_text    = text[:60] + ("…" if len(text) > 60 else "")
+            # Allow audio to run into the silence gap before the next segment
+            # (avoids artificially compressing speech with fix_duration)
+            next_start_s    = segments[i][0] if i < len(segments) else total_duration
+            max_seg_samples = int((next_start_s - start_s) * sr)
+            start_sample    = int(start_s * sr)
+            short_text      = text[:60] + ("…" if len(text) > 60 else "")
             print(f"   [{i}/{len(segments)}] {start_s:.1f}s–{end_s:.1f}s: {short_text}")
 
             try:
                 wav_np, seg_sr, _ = self._model.infer(
                     ref_file=str(reference_audio),
-                    ref_text="",            # auto-transcribe reference via faster-whisper
+                    ref_text="",         # auto-transcribe reference via faster-whisper
                     gen_text=text,
-                    fix_duration=seg_duration,  # match original segment window
-                    remove_silence=False,
+                    remove_silence=True, # strip internal silence from generated audio
                 )
 
                 seg_wav = torch.from_numpy(wav_np).float().unsqueeze(0)
@@ -134,13 +142,8 @@ class VoiceCloner:
                 if seg_sr != sr:
                     seg_wav = torchaudio.transforms.Resample(seg_sr, sr)(seg_wav)
 
-                # Clip or pad to the exact target window
-                target = int(seg_duration * sr)
-                if seg_wav.shape[1] < target:
-                    pad = torch.zeros(1, target - seg_wav.shape[1])
-                    seg_wav = torch.cat([seg_wav, pad], dim=1)
-                else:
-                    seg_wav = seg_wav[:, :target]
+                # Clip to avoid overlapping with the next segment
+                seg_wav = seg_wav[:, :max_seg_samples]
 
                 # Write into output buffer
                 end_sample = min(start_sample + seg_wav.shape[1], total_samples)

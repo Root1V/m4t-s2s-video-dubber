@@ -1,5 +1,6 @@
 """Dubbing pipeline — orchestrates translation + assembly for one or many videos."""
 
+import re
 import shutil
 import sys
 import traceback
@@ -116,7 +117,9 @@ class DubbingPipeline:
                     vocals_path, dummy_wav, src_lang=src_lang, tgt_lang=tgt_lang
                 )
                 ref_path = tmp_dir / "reference.wav"
-                self.cloner.extract_reference(vocals_path, ref_path)
+                self.cloner.extract_reference(
+                    vocals_path, ref_path, start_s=_first_speech_s(subtitles)
+                )
                 _wav, _sr = torchaudio.load(str(dummy_wav))
                 total_dur = _wav.shape[1] / _sr
                 del _wav
@@ -143,7 +146,9 @@ class DubbingPipeline:
                 _, subtitles = self.translator.translate(
                     video_path, dummy_wav, src_lang=src_lang, tgt_lang=tgt_lang
                 )
-                self.cloner.extract_reference(video_path, ref_path)
+                self.cloner.extract_reference(
+                    video_path, ref_path, start_s=_first_speech_s(subtitles)
+                )
                 _wav, _sr = torchaudio.load(str(dummy_wav))
                 total_dur = _wav.shape[1] / _sr
                 del _wav
@@ -244,6 +249,21 @@ def _mix_stems(vocals_path: Path, no_vocals_path: Path, output_path: Path) -> No
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torchaudio.save(str(output_path), mixed, sr_bg)
     print(f"🎚️  Mezcla guardada: '{output_path.name}'")
+
+
+def _first_speech_s(subtitles: list[tuple[float, float, str]]) -> float:
+    """Return start_s of the first segment with actual speech.
+
+    Skips segments whose text is entirely music/sound-effect notation
+    (e.g. ``(Música)`` or ``[Applause]``), which would give F5-TTS a
+    poor non-speech speaker reference.
+    """
+    _noise = re.compile(r'^[\(\[\♪♫]')
+    for start_s, _, text in subtitles:
+        stripped = text.strip()
+        if stripped and not _noise.match(stripped):
+            return start_s
+    return 0.0
 
 
 def _banner(title: str, width: int = 64) -> None:
