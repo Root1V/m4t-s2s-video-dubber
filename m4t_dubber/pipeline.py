@@ -32,14 +32,14 @@ class DubbingPipeline:
         video_name: str | None = None,
         src_lang: str | None = None,
         tgt_lang: str | None = None,
-        generate_srt: bool = True,
+        generate_srt: bool = False,
     ) -> None:
         """Process one or all videos and print a summary.
 
         Args:
             src_lang:     Source language code (e.g. "eng"). Defaults to M4T_SRC_LANG env var.
             tgt_lang:     Target language code (e.g. "spa", "fra", "por"). Defaults to M4T_TGT_LANG env var.
-            generate_srt: If True (default), write a .srt subtitle file alongside the output.
+            generate_srt: If True, write a .srt subtitle file alongside the output. Default: False.
         """
         videos = self._collect_videos(video_name)
 
@@ -83,7 +83,7 @@ class DubbingPipeline:
         video_path: Path,
         src_lang: str | None = None,
         tgt_lang: str | None = None,
-        generate_srt: bool = True,
+        generate_srt: bool = False,
     ) -> None:
         resolved_tgt = tgt_lang or config.TGT_LANG
         ts       = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -5,7 +5,7 @@ Uso:
   python main.py tutorial.mp4                  # traduce solo ese video
   python main.py tutorial.mp4 --tgt-lang fra    # traducir al francés
   python main.py tutorial.mp4 --src-lang spa --tgt-lang eng  # español → inglés
-  python main.py tutorial.mp4 --no-srt          # omitir generación de subtítulos
+  python main.py tutorial.mp4 --srt             # generar subtítulos .srt además del video
 
 Variables de entorno (o archivo .env):
   M4T_INPUT_DIR      Carpeta de videos de entrada
@@ -50,9 +50,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Idioma destino (ej: spa, fra, por, deu). Default: valor de M4T_TGT_LANG o 'spa'",
     )
     parser.add_argument(
-        "--no-srt",
+        "--srt",
         action="store_true",
-        help="No generar archivo de subtítulos .srt junto al video",
+        help="Generar archivo de subtítulos .srt junto al video traducido",
     )
     return parser
 
@@ -64,7 +64,7 @@ def main() -> int:
         args.video,
         src_lang=args.src_lang,
         tgt_lang=args.tgt_lang,
-        generate_srt=not args.no_srt,
+        generate_srt=args.srt,
     )
     return 0
 
