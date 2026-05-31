@@ -26,8 +26,18 @@ class DubbingPipeline:
 
     # ── Public API ────────────────────────────────────────────────
 
-    def run(self, video_name: str | None = None) -> None:
-        """Process one or all videos and print a summary."""
+    def run(
+        self,
+        video_name: str | None = None,
+        src_lang: str | None = None,
+        tgt_lang: str | None = None,
+    ) -> None:
+        """Process one or all videos and print a summary.
+
+        Args:
+            src_lang: Source language code (e.g. "eng"). Defaults to M4T_SRC_LANG env var.
+            tgt_lang: Target language code (e.g. "spa", "fra", "por"). Defaults to M4T_TGT_LANG env var.
+        """
         videos = self._collect_videos(video_name)
 
         _banner(f"PIPELINE — {len(videos)} video(s) en cola")
@@ -42,7 +52,7 @@ class DubbingPipeline:
             print(f"\n{'─' * 64}\n  [{i}/{len(videos)}] {video_path.name}\n{'─' * 64}")
             t0 = datetime.now()
             try:
-                self._process(video_path)
+                self._process(video_path, src_lang=src_lang, tgt_lang=tgt_lang)
                 self._move_to_processed(video_path)
                 duracion = str(datetime.now() - t0).split(".")[0]
                 exitosos.append((video_path.name, duracion))
@@ -65,16 +75,22 @@ class DubbingPipeline:
 
     # ── Private helpers ───────────────────────────────────────────
 
-    def _process(self, video_path: Path) -> None:
+    def _process(
+        self,
+        video_path: Path,
+        src_lang: str | None = None,
+        tgt_lang: str | None = None,
+    ) -> None:
+        resolved_tgt = tgt_lang or config.TGT_LANG
         ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
         stem     = video_path.stem
-        wav_path = config.OUTPUT_DIR / f"{stem}_esp_{ts}.wav"
-        mp4_path = config.OUTPUT_DIR / f"{stem}_esp_{ts}.mp4"
+        wav_path = config.OUTPUT_DIR / f"{stem}_{resolved_tgt}_{ts}.wav"
+        mp4_path = config.OUTPUT_DIR / f"{stem}_{resolved_tgt}_{ts}.mp4"
 
         _banner(f"[TRADUCIENDO] {video_path.name}")
-        self.translator.translate(video_path, wav_path)
+        self.translator.translate(video_path, wav_path, src_lang=src_lang, tgt_lang=tgt_lang)
 
-        _banner(f"[ENSAMBLANDO] {video_path.name}")
+        _banner(f"[ENSAMBLANDO] {video_path.name} → {resolved_tgt}")
         self.assembler.assemble(video_path, wav_path, mp4_path)
 
     def _collect_videos(self, name: str | None) -> list[Path]:

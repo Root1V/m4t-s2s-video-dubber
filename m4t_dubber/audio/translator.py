@@ -41,8 +41,22 @@ class AudioTranslator:
             SeamlessM4Tv2ForSpeechToSpeech.from_pretrained(config.MODEL_ID).to(self._device)
         )
 
-    def translate(self, input_path: Path, output_path: Path) -> Path:
-        """Translate audio track and save as WAV. Returns output_path."""
+    def translate(
+        self,
+        input_path: Path,
+        output_path: Path,
+        src_lang: str | None = None,
+        tgt_lang: str | None = None,
+    ) -> Path:
+        """Translate audio track and save as WAV. Returns output_path.
+
+        Args:
+            src_lang: Source language code (e.g. "eng"). Defaults to config.SRC_LANG.
+            tgt_lang: Target language code (e.g. "spa", "fra", "por"). Defaults to config.TGT_LANG.
+        """
+        src_lang = src_lang or config.SRC_LANG
+        tgt_lang = tgt_lang or config.TGT_LANG
+
         self.load_model()
         print(f"📂 Entrada : {input_path}")
         print(f"📂 Salida  : {output_path}")
@@ -58,8 +72,8 @@ class AudioTranslator:
         speech_s  = sum(s[1] - s[0] for s in segments if s[2]) / config.SAMPLE_RATE
         print(f"   ✓ {n_speech} segmentos de voz ({speech_s:.1f}s), {n_silence} de silencio")
 
-        print(f"\n🗣️ Traduciendo → {config.TGT_LANG} (speaker_id={config.SPEAKER_ID})...")
-        chunks = self._translate_segments(audio, segments)
+        print(f"\n🗣️ Traduciendo {src_lang} → {tgt_lang} (speaker_id={config.SPEAKER_ID})...")
+        chunks = self._translate_segments(audio, segments, src_lang=src_lang, tgt_lang=tgt_lang)
 
         print("\n🎛️ Uniendo fragmentos...")
         audio_final = torch.cat(chunks, dim=1)
@@ -82,7 +96,11 @@ class AudioTranslator:
         return audio
 
     def _translate_segments(
-        self, audio: torch.Tensor, segments: list[tuple[int, int, bool]]
+        self,
+        audio: torch.Tensor,
+        segments: list[tuple[int, int, bool]],
+        src_lang: str,
+        tgt_lang: str,
     ) -> list[torch.Tensor]:
         seg_max = config.SAMPLE_RATE * config.MAX_CHUNK_S
         seg_min = int(config.SAMPLE_RATE * config.MIN_CHUNK_S)
@@ -114,7 +132,7 @@ class AudioTranslator:
                 with torch.no_grad():
                     output = self._model.generate(
                         **inputs,
-                        tgt_lang=config.TGT_LANG,
+                        tgt_lang=tgt_lang,
                         speaker_id=config.SPEAKER_ID,
                         no_repeat_ngram_size=config.NO_REPEAT_NGRAM_SIZE,
                         repetition_penalty=config.REPETITION_PENALTY,
