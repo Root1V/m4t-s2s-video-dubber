@@ -1,0 +1,29 @@
+[project]
+name = "m4t-s2s-video-dubber"
+version = "1.0.0"
+description = "Traductor de video inglés→español con SeamlessM4T v2 (Apple Silicon MPS)"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+    "torchaudio>=2.2",
+    "transformers>=4.40",
+    "moviepy>=2.2.1",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+]
+
+[tool.uv]
+# UV gestiona el entorno virtual en .venv/
+# Comandos útiles:
+#   uv sync              — instalar dependencias del lockfile
+#   uv add <paquete>     — agregar dependencia
+#   uv run python main.py — ejecutar sin activar el venv
+#   uv lock              — regenerar uv.lock
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

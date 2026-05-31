@@ -1,5 +1,8 @@
-# Entorno virtual
+# Entorno virtual (UV lo gestiona, no se commitea)
 .venv/
+
+# uv.lock SÍ se commitea — garantiza reproducibilidad
+# No agregar uv.lock aquí
 
 # Python
 __pycache__/
