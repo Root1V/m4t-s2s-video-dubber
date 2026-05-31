@@ -14,7 +14,7 @@ dependencies = [
     "protobuf>=7.35.0",
     "torchcodec>=0.13.0",
     "demucs>=4.0.1",
-    "f5-tts>=1.1.20",
+    "TTS>=0.22.0",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +23,10 @@ dev = [
 ]
 
 [tool.uv]
+# Override: TTS 0.22.0 pina numpy==1.22.0 en Python<3.11, pero funciona con 1.24+
+override-dependencies = [
+    "numpy>=1.24",
+]
 # UV gestiona el entorno virtual en .venv/
 # Comandos útiles:
 #   uv sync              — instalar dependencias del lockfile

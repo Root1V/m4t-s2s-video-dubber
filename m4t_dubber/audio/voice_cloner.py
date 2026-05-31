@@ -1,29 +1,43 @@
-"""Voice cloner — zero-shot synthesis of translated speech in the original speaker's voice.
+"""Voice cloner — clonación de voz cross-lingüe del hablante original.
 
-Uses F5-TTS (v1 Base) with a short reference audio clip (~15 s) extracted from the
-original speaker.  The F5-TTS model (~1.5 GB) is downloaded on first use from
-HuggingFace and cached at ~/.cache/huggingface/.
+Usa XTTS v2 (Coqui TTS) para síntesis zero-shot cross-lingüe.  El modelo (~1.8 GB)
+se descarga en el primer uso desde HuggingFace y se cachea en ~/.local/share/tts/.
 
-Cross-lingual cloning: reference audio can be in any language; the generated speech
-targets the language of ``gen_text``.
+Clonación cross-lingüe: la referencia puede estar en cualquier idioma (p.ej. inglés);
+el audio generado estará en el idioma destino (p.ej. español) con fonética nativa
+y el timbre de voz del hablante original — sin acento extranjero.
 
-Supported languages: en, es, fr, de, pt, it, ja, zh, ko, ru, ar, nl, pl, tr, hi …
+Idiomas soportados: es, en, fr, de, pt, it, ja, zh-cn, ko, ru, ar, nl, pl, tr, hi …
 """
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import torch
 import torchaudio
 
+# SeamlessM4T 3-letter codes → XTTS 2-letter codes
+_LANG_MAP: dict[str, str] = {
+    "spa": "es", "eng": "en", "fra": "fr", "deu": "de", "por": "pt",
+    "ita": "it", "jpn": "ja", "cmn": "zh-cn", "ara": "ar", "rus": "ru",
+    "nld": "nl", "pol": "pl", "tur": "tr", "kor": "ko", "hin": "hi",
+    "hun": "hu", "ces": "cs",
+    # también acepta códigos cortos directamente
+    "es": "es", "en": "en", "fr": "fr", "de": "de", "pt": "pt",
+    "it": "it", "ja": "ja", "ar": "ar", "ru": "ru", "nl": "nl",
+    "pl": "pl", "tr": "tr", "ko": "ko", "hi": "hi",
+}
+
 
 class VoiceCloner:
-    """Zero-shot voice cloning with F5-TTS."""
+    """Clonación de voz cross-lingüe con XTTS v2."""
 
-    MODEL_NAME   = "F5TTS_v1_Base"
-    SAMPLE_RATE  = 24_000   # F5-TTS native output sample rate
-    REF_DURATION = 15.0     # seconds of reference audio used for voice conditioning
+    MODEL_NAME   = "tts_models/multilingual/multi-dataset/xtts_v2"
+    SAMPLE_RATE  = 24_000   # tasa de muestreo nativa de XTTS v2
+    REF_DURATION = 15.0     # segundos de referencia usados para condicionamiento
 
     def __init__(self) -> None:
         self._model = None
@@ -31,14 +45,23 @@ class VoiceCloner:
     # ── Public API ────────────────────────────────────────────────
 
     def load_model(self) -> None:
-        """Lazy-load F5-TTS (~1.5 GB download on first run)."""
+        """Lazy-load XTTS v2 (~1.8 GB descarga en primer uso)."""
         if self._model is not None:
             return
-        from f5_tts.api import F5TTS  # noqa: PLC0415
+        from TTS.api import TTS  # noqa: PLC0415
 
-        print("🎙️ Cargando F5-TTS (primera ejecución: ~1.5 GB descarga)...")
-        self._model = F5TTS(model=self.MODEL_NAME)
-        print("   ✓ F5-TTS listo")
+        # Aceptar términos de uso de Coqui automáticamente
+        os.environ.setdefault("COQUI_TOS_AGREED", "1")
+
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        print(f"🎙️ Cargando XTTS v2 (primera ejecución: ~1.8 GB descarga)...")
+        self._model = TTS(self.MODEL_NAME)
+        try:
+            self._model.to(device)
+            print(f"   ✓ XTTS v2 listo en {device}")
+        except Exception:
+            self._model.to("cpu")
+            print("   ✓ XTTS v2 listo en cpu")
 
     def extract_reference(
         self,
@@ -83,20 +106,19 @@ class VoiceCloner:
         reference_audio: Path,
         output_path: Path,
         total_duration: float | None = None,
+        language: str = "es",
     ) -> Path:
-        """Synthesize each text segment in the cloned voice, preserving original timing.
+        """Sintetiza cada segmento de texto con la voz clonada, preservando el timing original.
 
-        Each segment is placed at its original start timestamp with silence gaps between
-        segments to maintain the original speech / pause structure.
-
-        ``fix_duration`` is passed to F5-TTS so the synthesized clip matches the original
-        segment window exactly — no post-hoc resampling needed.
+        Usa XTTS v2 para clonación cross-lingüe: el timbre del hablante original se
+        preserva, pero la fonética es nativa del idioma destino (sin acento extranjero).
 
         Args:
-            segments:        ``(start_s, end_s, translated_text)`` from SeamlessM4T.
-            reference_audio: Short WAV of the original speaker (3–60 s).
-            output_path:     Destination WAV path (24 kHz, mono).
-            total_duration:  Output length in seconds.  Defaults to end of last segment.
+            segments:        ``(start_s, end_s, texto_traducido)`` de SeamlessM4T.
+            reference_audio: WAV corto del hablante original (3–60 s).
+            output_path:     Ruta WAV de salida (24 kHz, mono).
+            total_duration:  Duración total en segundos. Por defecto: fin del último segmento.
+            language:        Código de idioma destino (3 letras SeamlessM4T o 2 letras XTTS).
 
         Returns:
             ``output_path``
@@ -106,6 +128,9 @@ class VoiceCloner:
         if not segments:
             raise ValueError("segments list is empty — nothing to synthesize")
 
+        # Resolver código de idioma al formato XTTS
+        xtts_lang = _LANG_MAP.get(language, language[:2].lower())
+
         sr = self.SAMPLE_RATE
         if total_duration is None:
             total_duration = segments[-1][1]
@@ -113,15 +138,14 @@ class VoiceCloner:
         total_samples = int(total_duration * sr)
         output = torch.zeros(1, total_samples)
 
-        print(f"🎙️ Sintetizando {len(segments)} segmento(s) con voz clonada...")
+        print(f"🎙️ Sintetizando {len(segments)} segmento(s) con voz clonada ({xtts_lang})...")
         print(f"   Referencia: {reference_audio.name}")
 
         for i, (start_s, end_s, text) in enumerate(segments, 1):
             if not text.strip():
                 continue
 
-            # Allow audio to run into the silence gap before the next segment
-            # (avoids artificially compressing speech with fix_duration)
+            # Permitir que el audio ocupe hasta el inicio del siguiente segmento
             next_start_s    = segments[i][0] if i < len(segments) else total_duration
             max_seg_samples = int((next_start_s - start_s) * sr)
             start_sample    = int(start_s * sr)
@@ -129,23 +153,23 @@ class VoiceCloner:
             print(f"   [{i}/{len(segments)}] {start_s:.1f}s–{end_s:.1f}s: {short_text}")
 
             try:
-                wav_np, seg_sr, _ = self._model.infer(
-                    ref_file=str(reference_audio),
-                    ref_text="",         # auto-transcribe reference via faster-whisper
-                    gen_text=text,
-                    remove_silence=True, # strip internal silence from generated audio
+                wav_data = self._model.tts(
+                    text=text,
+                    speaker_wav=str(reference_audio),
+                    language=xtts_lang,
                 )
+                wav_np  = np.array(wav_data, dtype=np.float32)
+                seg_wav = torch.from_numpy(wav_np).unsqueeze(0)
 
-                seg_wav = torch.from_numpy(wav_np).float().unsqueeze(0)
+                # Resamplear si el modelo devuelve una tasa distinta
+                model_sr = getattr(self._model.synthesizer, "output_sample_rate", sr)
+                if model_sr != sr:
+                    seg_wav = torchaudio.transforms.Resample(model_sr, sr)(seg_wav)
 
-                # Resample to output SR if model returned a different rate
-                if seg_sr != sr:
-                    seg_wav = torchaudio.transforms.Resample(seg_sr, sr)(seg_wav)
-
-                # Clip to avoid overlapping with the next segment
+                # Recortar para no solapar con el siguiente segmento
                 seg_wav = seg_wav[:, :max_seg_samples]
 
-                # Write into output buffer
+                # Escribir en el buffer de salida
                 end_sample = min(start_sample + seg_wav.shape[1], total_samples)
                 length     = end_sample - start_sample
                 output[:, start_sample:end_sample] = seg_wav[:, :length]

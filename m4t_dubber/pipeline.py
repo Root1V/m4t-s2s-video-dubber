@@ -127,7 +127,8 @@ class DubbingPipeline:
                 _banner(f"[CLONANDO VOZ] {video_path.name}")
                 self.cloner.synthesize_from_segments(
                     _filter_translation(subtitles, resolved_tgt),
-                    ref_path, vocals_cloned, total_duration=total_dur
+                    ref_path, vocals_cloned, total_duration=total_dur,
+                    language=resolved_tgt,
                 )
                 _banner(f"[MEZCLANDO STEMS] {video_path.name}")
                 _mix_stems(vocals_cloned, no_vocals_path, wav_path)
@@ -157,7 +158,8 @@ class DubbingPipeline:
                 _banner(f"[CLONANDO VOZ] {video_path.name}")
                 self.cloner.synthesize_from_segments(
                     _filter_translation(subtitles, resolved_tgt),
-                    ref_path, wav_path, total_duration=total_dur
+                    ref_path, wav_path, total_duration=total_dur,
+                    language=resolved_tgt,
                 )
 
         elif use_stem:
